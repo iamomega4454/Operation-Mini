@@ -80,3 +80,35 @@ Thumbs.db
 **/dist/
 **/build/
 *.keystore
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+.venv/
+venv/
+auramodule/venv-linux/
+
+# Pytest / cache
+.pytest_cache/
+pytest-cache-files-*/
+.cache/
+
+# Node
+node_modules/
+
+# Expo / React Native
+.expo/
+dist/
+build/
+
+# Android / Gradle
+.gradle/
+local.properties
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

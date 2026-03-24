@@ -24,7 +24,7 @@ _connected_clients: Set[web.WebSocketResponse] = set()
 _client_last_activity: Dict[web.WebSocketResponse, float] = {}
 
 
-_session_auth: Dict[web.WebSocketResponse, Dict[str, str]] = {}
+_session_auth: Dict[web.WebSocketResponse, Dict[str, Any]] = {}
 
 
 _shutting_down = False
@@ -425,6 +425,7 @@ async def _ws_handler(request):
                     _session_auth[ws] = {
                         "patient_uid": patient,
                         "auth_token": token,
+                        "mic_authorized": False,
                     }
                     settings.patient_uid = patient
                     settings.backend_auth_token = token
@@ -481,7 +482,20 @@ async def _ws_handler(request):
                         results = await identify_person(
                             frame, auth.get("patient_uid", ""), auth.get("auth_token", "")
                         )
-                        await ws.send_json({"type": "identify_result", "faces": results})
+                        mic_started = any(
+                            person.get("name") not in (None, "", "unknown")
+                            for person in results
+                        )
+                        auth["mic_authorized"] = mic_started
+                        if mic_started:
+                            mic_service.start()
+                        await ws.send_json(
+                            {
+                                "type": "identify_result",
+                                "faces": results,
+                                "mic_started": mic_started,
+                            }
+                        )
                     except Exception as e:
                         logger.error(f"[WS] Face identification error: {e}")
                         await ws.send_json({
@@ -491,6 +505,14 @@ async def _ws_handler(request):
                         })
 
                 elif cmd == "start_listening":
+                    auth = _session_auth.get(ws, {})
+                    if not auth.get("mic_authorized"):
+                        await ws.send_json({
+                            "type": "listening",
+                            "status": "denied",
+                            "error": "face_not_recognized",
+                        })
+                        continue
                     mic_service.start()
                     await ws.send_json({"type": "listening", "status": "started"})
 
@@ -709,10 +731,11 @@ async def _ws_handler(request):
 
                 elif cmd == "live_transcription_start":
                     auth = _session_auth.get(ws, {})
-                    if not auth:
+                    if not auth.get("mic_authorized"):
                         await ws.send_json({
                             "type": "live_transcription",
-                            "error": "not_authenticated"
+                            "status": "denied",
+                            "error": "face_not_recognized",
                         })
                         continue
                     

@@ -13,6 +13,10 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import api from '../../src/services/api';
 import {
+    ensureAuraMicAuthorized,
+    isAuraConnected,
+} from '../../src/services/aura-discovery';
+import {
     sendMessageStream,
     resetConversation,
     initializeOrito,
@@ -203,6 +207,7 @@ export default function ChatScreen() {
     const [overlayResponse, setOverlayResponse] = useState('');
     const [showOverlay, setShowOverlay] = useState(false);
     const [userName, setUserName] = useState<string | null>(null);
+    const [micGateMessage, setMicGateMessage] = useState<string | null>(null);
 
     const fadeAnim = useRef(new Animated.Value(0)).current;
     // Ref that mirrors overlayTranscription state so timeout closures always read the latest value
@@ -410,6 +415,21 @@ export default function ChatScreen() {
         isStartingListeningRef.current = true;
 
         try {
+            if (isAuraConnected()) {
+                const micAuthorization = await ensureAuraMicAuthorized();
+                if (!micAuthorization.allowed) {
+                    const deniedMessage = micAuthorization.message || 'Face not recognized. Please look at the Aura camera and try again.';
+                    setMicGateMessage(deniedMessage);
+                    conversationActiveRef.current = false;
+                    shouldAutoRestartRef.current = false;
+                    setListening(false);
+                    setOverlay('idle');
+                    Alert.alert('Face Not Recognized', deniedMessage);
+                    return;
+                }
+            }
+
+            setMicGateMessage(null);
             void playWakeSound();
 
             setOverlayResponse('');
@@ -565,6 +585,7 @@ export default function ChatScreen() {
         setOverlayTranscription('');
         overlayTranscriptionRef.current = '';
         setOverlayResponse('');
+        setMicGateMessage(null);
         setListening(false);
         isProcessingTranscriptRef.current = false;
         isStartingListeningRef.current = false;
@@ -716,6 +737,9 @@ export default function ChatScreen() {
                     </View>
                 </TouchableOpacity>
                 <Text style={s.statusLabel}>{getVoiceStateLabel(overlayState)}</Text>
+                {micGateMessage ? (
+                    <Text style={s.micGateMessage}>{micGateMessage}</Text>
+                ) : null}
                 {userName && !liveTranscript ? (
                     <Text style={s.userNameHint}>Connected as {userName}</Text>
                 ) : null}
@@ -786,6 +810,13 @@ const s = StyleSheet.create({
         color: '#475569',
         fontSize: fonts.sizes.xs,
         marginTop: 4,
+    },
+    micGateMessage: {
+        color: '#fca5a5',
+        fontSize: fonts.sizes.xs,
+        marginTop: 6,
+        textAlign: 'center',
+        paddingHorizontal: 24,
     },
     transcriptCard: {
         flexDirection: 'row',

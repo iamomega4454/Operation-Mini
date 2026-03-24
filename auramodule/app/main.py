@@ -3,9 +3,9 @@ import asyncio
 import logging
 import os
 import platform
-import re
 import select
 import signal
+import shutil
 import socket
 import subprocess
 import sys
@@ -14,6 +14,7 @@ import time
 from pathlib import Path
 from typing import IO, Any, Dict, List, Optional
 
+import psutil
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -161,54 +162,21 @@ def check_system_resources() -> Dict[str, Any]:
     }
     
     try:
-        result = subprocess.run(
-            ["df", "-BG", "/"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if result.returncode == 0:
-            lines = result.stdout.strip().split("\n")
-            if len(lines) > 1:
-                match = re.search(r"(\d+)G", lines[1])
-                if match:
-                    resources["disk_space_gb"] = int(match.group(1))
-                    resources["ok"] = resources["disk_space_gb"] >= 2
+        _, _, free = shutil.disk_usage(Path.cwd())
+        resources["disk_space_gb"] = round(free / (1024 ** 3), 1)
+        resources["ok"] = resources["disk_space_gb"] >= 2
     except Exception:
         pass
     
     try:
-        result = subprocess.run(
-            ["free", "-g"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if result.returncode == 0:
-            lines = result.stdout.strip().split("\n")
-            if len(lines) > 1:
-                parts = lines[1].split()
-                if len(parts) >= 2:
-                    resources["memory_total_gb"] = int(parts[1])
-                    resources["memory_available_gb"] = int(parts[6])
+        memory_info = psutil.virtual_memory()
+        resources["memory_total_gb"] = round(memory_info.total / (1024 ** 3), 1)
+        resources["memory_available_gb"] = round(memory_info.available / (1024 ** 3), 1)
     except Exception:
         pass
     
     try:
-        result = subprocess.run(
-            ["top", "-bn1"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if result.returncode == 0:
-            for line in result.stdout.split("\n"):
-                if "Cpu(s)" in line:
-                    match = re.search(r"(\d+\.\d+)\s*id", line)
-                    if match:
-                        idle = float(match.group(1))
-                        resources["cpu_usage_percent"] = round(100 - idle, 1)
-                    break
+        resources["cpu_usage_percent"] = round(psutil.cpu_percent(interval=1), 1)
     except Exception:
         pass
     
@@ -375,19 +343,18 @@ def prompt_ollama_model_selection(installed_models: List[str]) -> Optional[str]:
 #------This Function checks/installs PyAudio----------
 def check_pyaudio():
     print_section("Audio Dependencies")
-    auto_install = os.environ.get("AUTO_INSTALL_DEPS", "false").lower() == "true"
-    
-    if not auto_install:
-        print_status("â—", "PyAudio not found - auto-install disabled", YELLOW)
-        print(f"  {CYAN}â†’{RESET} To enable, run with: AUTO_INSTALL_DEPS=true python -m app.main")
-        return False
-    
     try:
         import pyaudio
         print_status("â—", f"PyAudio installed")
         return True
     except ImportError:
         pass
+
+    auto_install = os.environ.get("AUTO_INSTALL_DEPS", "false").lower() == "true"
+    if not auto_install:
+        print_status("â—", "PyAudio not found - auto-install disabled", YELLOW)
+        print(f"  {CYAN}â†’{RESET} To enable, run with: AUTO_INSTALL_DEPS=true python -m app.main")
+        return False
     
     print(f"  {CYAN}â†’{RESET} Installing PyAudio...")
     
@@ -722,17 +689,9 @@ def check_ollama():
 #------This Function checks InsightFace model----------
 def check_models() -> bool:
     print_section("ML Models")
-    auto_install = os.environ.get("AUTO_INSTALL_DEPS", "false").lower() == "true"
-    
-    if not auto_install:
-        print_status("â—", "InsightFace not found - auto-install disabled", YELLOW)
-        print(f"  {CYAN}â†’{RESET} To enable, run with: AUTO_INSTALL_DEPS=true python -m app.main")
-        return False
-    
     print(f"  {BLUE}â€º{RESET} Checking InsightFace/buffalo_l...")
     
     try:
-        import insightface
         from insightface.app import FaceAnalysis
         
         print(f"  {CYAN}â†’{RESET} Initializing buffalo_l model (first run may download weights)...")
@@ -743,7 +702,11 @@ def check_models() -> bool:
         
     except ImportError:
         print_status("â—", "InsightFace not installed", YELLOW)
-        
+        auto_install = os.environ.get("AUTO_INSTALL_DEPS", "false").lower() == "true"
+        if not auto_install:
+            print(f"  {CYAN}â†’{RESET} To enable, run with: AUTO_INSTALL_DEPS=true python -m app.main")
+            return False
+
         print(f"  {CYAN}â†’{RESET} Installing InsightFace and dependencies...")
         
         try:
@@ -1179,11 +1142,7 @@ async def main():
         on_summarize=on_summarize,
         event_loop=asyncio.get_running_loop(),
     )
-    continuous_microphone.start()
-    print_status(
-        "â—",
-        f"Continuous microphone started ({settings.continuous_summary_interval_minutes}-minute summarization)",
-    )
+    print_status("â—", "Continuous microphone deferred until face recognition", YELLOW)
 
     discovery_service.start()
     print_status("â—", "mDNS discovery broadcasting")

@@ -65,9 +65,8 @@
     "typescript": "~5.9.3"
   },
   "overrides": {
-    "expo": "55.0.0-preview.10",
-    "@expo/config-plugins": "55.0.4",
-    "@expo/config-types": "55.0.0"
+  "@expo/config-plugins": "55.0.4",
+  "@expo/config-types": "55.0.0"
   },
   "private": true
 }

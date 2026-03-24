@@ -24,6 +24,20 @@ interface BackendAuraModule {
 
 type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
 
+interface AuraIdentifyResultMessage {
+    type: 'identify_result';
+    faces?: any[];
+    mic_started?: boolean;
+    error?: string;
+    message?: string;
+}
+
+interface AuraMicAuthorizationResult {
+    allowed: boolean;
+    message?: string;
+    response?: AuraIdentifyResultMessage;
+}
+
 let ws: WebSocket | null = null;
 let messageHandler: ((data: any) => void) | null = null;
 let stateChangeHandler: ((state: ConnectionState) => void) | null = null;
@@ -32,12 +46,98 @@ let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 10;
 const RECONNECT_DELAYS = [1000, 2000, 4000, 8000, 16000, 30000]; 
 
+let pendingIdentifyRequest: Promise<AuraMicAuthorizationResult> | null = null;
+let resolvePendingIdentify: ((value: AuraMicAuthorizationResult) => void) | null = null;
+let identifyTimeoutHandle: ReturnType<typeof setTimeout> | null = null;
+let lastIdentifyResult: AuraIdentifyResultMessage | null = null;
+
+const IDENTIFY_TIMEOUT_MS = 15000;
 
 let storedIp: string = '';
 let storedPort: number = 8001;
 let storedPatientUid: string = '';
 let storedAuthToken: string = '';
 let storedBackendUrl: string = '';
+
+//------This Function handles the Reset Identify Request--------- 
+function resetIdentifyRequest() {
+    if (identifyTimeoutHandle) {
+        clearTimeout(identifyTimeoutHandle);
+        identifyTimeoutHandle = null;
+    }
+    pendingIdentifyRequest = null;
+    resolvePendingIdentify = null;
+}
+
+//------This Function handles the Get Face Gate Message---------
+function getFaceGateMessage(payload?: Partial<AuraIdentifyResultMessage>): string {
+    const message = typeof payload?.message === 'string' ? payload.message.trim() : '';
+    if (message) {
+        return message;
+    }
+
+    switch (payload?.error) {
+        case 'no_frame':
+            return 'Aura camera is unavailable. Please try again.';
+        case 'not_authenticated':
+            return 'Aura module is not authenticated. Please reconnect and try again.';
+        case 'identification_failed':
+            return 'Face recognition failed. Please try again.';
+        default:
+            return 'Face not recognized. Please look at the Aura camera and try again.';
+    }
+}
+
+//------This Function handles the Resolve Identify Request---------
+function settleIdentifyRequest(result: AuraMicAuthorizationResult) {
+    if (resolvePendingIdentify) {
+        resolvePendingIdentify(result);
+    }
+    resetIdentifyRequest();
+}
+
+//------This Function handles the Dispatch Aura Message---------
+function dispatchAuraMessage(data: any) {
+    if (data?.type === 'identify_result') {
+        const identifyResult = data as AuraIdentifyResultMessage;
+        lastIdentifyResult = identifyResult;
+        settleIdentifyRequest({
+            allowed: identifyResult.mic_started === true,
+            message: identifyResult.mic_started ? undefined : getFaceGateMessage(identifyResult),
+            response: identifyResult,
+        });
+    }
+
+    messageHandler?.(data);
+}
+
+//------This Function handles the Wait For Identify Result---------
+export async function ensureAuraMicAuthorized(): Promise<AuraMicAuthorizationResult> {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+        return {
+            allowed: false,
+            message: 'Aura module is not connected.',
+        };
+    }
+
+    if (pendingIdentifyRequest) {
+        return pendingIdentifyRequest;
+    }
+
+    pendingIdentifyRequest = new Promise<AuraMicAuthorizationResult>((resolve) => {
+        resolvePendingIdentify = resolve;
+        identifyTimeoutHandle = setTimeout(() => {
+            settleIdentifyRequest({
+                allowed: false,
+                message: 'Face recognition timed out. Please try again.',
+            });
+        }, IDENTIFY_TIMEOUT_MS);
+    });
+
+    lastIdentifyResult = null;
+    ws.send(JSON.stringify({ command: 'identify' }));
+    return pendingIdentifyRequest;
+}
 
 //------This Function handles the Normalize Backend Url---------
 function normalizeBackendUrl(url: string): string {
@@ -263,6 +363,8 @@ export function connectToAura(
         connectionState = 'connected';
         stateChangeHandler?.('connected');
         console.log('[AURA] WebSocket connected');
+        lastIdentifyResult = null;
+        resetIdentifyRequest();
         
         const connectPayload: Record<string, string> = {
             command: 'connect',
@@ -278,7 +380,7 @@ export function connectToAura(
     ws.onmessage = (event) => {
         try {
             const data = JSON.parse(event.data);
-            messageHandler?.(data);
+            dispatchAuraMessage(data);
         } catch { }
     };
 
@@ -290,6 +392,11 @@ export function connectToAura(
         const wasConnected = connectionState === 'connected';
         connectionState = 'disconnected';
         stateChangeHandler?.('disconnected');
+        lastIdentifyResult = null;
+        settleIdentifyRequest({
+            allowed: false,
+            message: 'Aura module disconnected before face recognition completed.',
+        });
         
         console.log('[AURA] WebSocket closed, attempting reconnection...');
         
@@ -342,10 +449,31 @@ const attemptReconnection = () => {
 };
 
 //------This Function handles the Send Aura Command---------
-export function sendAuraCommand(command: string, extra: Record<string, any> = {}) {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ command, ...extra }));
+export async function sendAuraCommand(command: string, extra: Record<string, any> = {}): Promise<boolean> {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+        return false;
     }
+
+    if (command === 'identify') {
+        const authorization = await ensureAuraMicAuthorized();
+        return Boolean(authorization.response);
+    }
+
+    if (command === 'start_listening' || command === 'live_transcription_start') {
+        const authorization = await ensureAuraMicAuthorized();
+        if (!authorization.allowed) {
+            dispatchAuraMessage({
+                type: command === 'start_listening' ? 'listening' : 'live_transcription',
+                status: 'denied',
+                error: 'face_not_recognized',
+                message: authorization.message || getFaceGateMessage(lastIdentifyResult || undefined),
+            });
+            return false;
+        }
+    }
+
+    ws.send(JSON.stringify({ command, ...extra }));
+    return true;
 }
 
 //------This Function handles the Disconnect Aura---------
@@ -354,6 +482,11 @@ export function disconnectAura() {
     reconnectAttempts = MAX_RECONNECT_ATTEMPTS; 
     connectionState = 'disconnected';
     stateChangeHandler?.('disconnected');
+    lastIdentifyResult = null;
+    settleIdentifyRequest({
+        allowed: false,
+        message: 'Aura module disconnected.',
+    });
     
     if (ws) {
         ws.close();
