@@ -11,6 +11,7 @@ from app.models.relative import Relative
 from app.models.sos import SOSEvent
 from app.models.suggestion import Suggestion
 from app.services.notifications import notification_service
+from app.utils.caregiver_links import link_caregiver_to_patient, unlink_caregiver_from_patient
 
 logger = logging.getLogger(__name__)
 
@@ -949,13 +950,12 @@ async def _add_caregiver(uid: str, email: str) -> str:
         return "User not found."
     caregiver = await User.find_one(User.email == email)
     if not caregiver:
-        return f"No user found with email '{email}'. They must be registered first."
-    if email not in user.caregiver_emails:
-        user.caregiver_emails.append(email)
-        await user.save()
-    if uid not in caregiver.linked_patients:
-        caregiver.linked_patients.append(uid)
-        await caregiver.save()
+        if email not in user.caregiver_emails:
+            user.caregiver_emails.append(email)
+            user.updated_at = datetime.utcnow()
+            await user.save()
+        return f"Caregiver invite for '{email}' saved. Their role will sync after they register."
+    await link_caregiver_to_patient(user, caregiver)
     return f"Caregiver '{caregiver.display_name or email}' added successfully."
 
 
@@ -963,13 +963,7 @@ async def _remove_caregiver(uid: str, email: str) -> str:
     user = await User.find_one(User.firebase_uid == uid)
     if not user:
         return "User not found."
-    if email in user.caregiver_emails:
-        user.caregiver_emails.remove(email)
-        await user.save()
-    caregiver = await User.find_one(User.email == email)
-    if caregiver and uid in caregiver.linked_patients:
-        caregiver.linked_patients.remove(uid)
-        await caregiver.save()
+    await unlink_caregiver_from_patient(user, email)
     return f"Caregiver '{email}' removed."
 
 

@@ -15,6 +15,7 @@ import {
 import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { useAuth } from '../../src/context/auth';
+import { useAssessment } from '../../src/context/assessment';
 import { useAura } from '../../src/context/aura';
 import Screen from '../../src/components/Screen';
 import Card from '../../src/components/Card';
@@ -50,6 +51,7 @@ interface Suggestion {
 export default function PatientDashboard() {
     const router = useRouter();
     const { user, isVoiceSetup, loading: authLoading } = useAuth();
+    const { recommendedSurveys } = useAssessment();
     const {
         isConnected,
         moduleIp,
@@ -81,6 +83,7 @@ export default function PatientDashboard() {
 
     const pulseAnim = useRef(new Animated.Value(1)).current;
     const pulseScale = useRef(new Animated.Value(1)).current;
+    const recommendedAssessment = recommendedSurveys.find((survey) => survey.survey_type === 'patient');
 
     useEffect(() => {
         if (!authLoading && user) {
@@ -307,6 +310,23 @@ export default function PatientDashboard() {
                     <ActivityIndicator size="small" color={colors.white} />
                     <Text style={s.autoConnectText}>{autoConnectMessage}</Text>
                 </View>
+            )}
+
+            {recommendedAssessment && (
+                <TouchableOpacity
+                    style={s.assessmentCard}
+                    onPress={() => router.push('/(assessment)/patient' as any)}
+                    activeOpacity={0.85}
+                >
+                    <View style={s.assessmentIcon}>
+                        <Ionicons name="pulse-outline" size={18} color={colors.bg} />
+                    </View>
+                    <View style={s.assessmentCopy}>
+                        <Text style={s.assessmentTitle}>Refine Your Support Profile</Text>
+                        <Text style={s.assessmentText}>A quick follow-up can improve confidence and personalization.</Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+                </TouchableOpacity>
             )}
 
             { }
@@ -676,6 +696,40 @@ const s = StyleSheet.create({
     autoConnectText: {
         color: colors.white,
         fontSize: fonts.sizes.sm,
+    },
+    assessmentCard: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: spacing.md,
+        marginHorizontal: spacing.lg,
+        marginBottom: spacing.md,
+        padding: spacing.md,
+        borderRadius: radius.xl,
+        borderWidth: 1,
+        borderColor: colors.border,
+        backgroundColor: colors.surface,
+    },
+    assessmentIcon: {
+        width: 38,
+        height: 38,
+        borderRadius: 19,
+        backgroundColor: colors.white,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    assessmentCopy: {
+        flex: 1,
+        gap: 2,
+    },
+    assessmentTitle: {
+        color: colors.textPrimary,
+        fontSize: fonts.sizes.sm,
+        fontWeight: '700',
+    },
+    assessmentText: {
+        color: colors.textSecondary,
+        fontSize: fonts.sizes.xs,
+        lineHeight: 18,
     },
     centerContent: {
         flex: 1,

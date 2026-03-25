@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, Animated, Dimensions } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../src/context/auth';
+import { useAssessment } from '../src/context/assessment';
 import { colors, fonts, spacing } from '../src/theme';
 
 const { height } = Dimensions.get('window');
@@ -17,6 +18,7 @@ const LETTERS = [
 export default function SplashScreen() {
     const router = useRouter();
     const { user, loading } = useAuth();
+    const { nextRequiredSurvey, loading: assessmentLoading } = useAssessment();
     const fadeAnims = useRef(LETTERS.map(() => new Animated.Value(0))).current;
     const wordAnims = useRef(LETTERS.map(() => new Animated.Value(0))).current;
     const containerFade = useRef(new Animated.Value(1)).current;
@@ -41,17 +43,19 @@ export default function SplashScreen() {
     }, []);
 
     useEffect(() => {
-        if (isAnimationDone && !loading) {
+        if (isAnimationDone && !loading && (!user || !assessmentLoading)) {
             Animated.timing(containerFade, { toValue: 0, duration: 500, useNativeDriver: true }).start(() => {
                 navigate();
             });
         }
-    }, [isAnimationDone, loading]);
+    }, [isAnimationDone, loading, assessmentLoading, user]);
 
     //------This Function handles the Navigate---------
     function navigate() {
         if (!user) {
             router.replace('/(auth)/login');
+        } else if (nextRequiredSurvey) {
+            router.replace((nextRequiredSurvey.survey_type === 'caregiver' ? '/(assessment)/caregiver' : '/(assessment)/patient') as any);
         } else if (!user.is_onboarded && user.role === 'patient') {
             router.replace('/(onboarding)/illness');
         } else if (!user.is_onboarded && user.role === 'caregiver') {

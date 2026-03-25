@@ -80,8 +80,19 @@ export default function ReportsScreen() {
                 try { const stepHistory = await getStepHistory(7); const thisWeekSteps = Object.values(stepHistory).reduce((a: number, b: number) => a + b, 0) as number; setWeeklyComparison({ ...weeklyRes.data, thisWeek: { ...weeklyRes.data.thisWeek, steps: thisWeekSteps } }); }
                 catch { setWeeklyComparison(weeklyRes.data); }
             } else { setWeeklyComparison(null); }
-            if (alertsRes?.data) { setAlerts(alertsRes.data); } else { setAlerts([]); }
-            try { const meRes = await api.get('/auth/me'); const lp = meRes.data.linked_patients || []; if (lp.length > 0 && lp[0].phone) { setPatientPhone(lp[0].phone); } } catch { }
+            if (alertsRes?.data) { setAlerts(alertsRes.data.alerts || []); } else { setAlerts([]); }
+            try {
+                const meRes = await api.get('/auth/me');
+                const lp = Array.isArray(meRes.data.linked_patients) ? meRes.data.linked_patients : [];
+                const firstLinkedPatient = lp[0];
+                if (firstLinkedPatient && typeof firstLinkedPatient === 'object' && 'phone' in firstLinkedPatient) {
+                    setPatientPhone((firstLinkedPatient as { phone?: string }).phone || '');
+                } else {
+                    setPatientPhone('');
+                }
+            } catch {
+                setPatientPhone('');
+            }
         } catch { setError('Failed to load report data.'); } finally { setLoading(false); }
     }
 

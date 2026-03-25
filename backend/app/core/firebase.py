@@ -141,6 +141,14 @@ def _cache_verified_claims(token: str, claims: Dict[str, Any]) -> None:
     }
 
 
+#------This Function extracts the Firebase UID from verified claims---------
+def _extract_uid_from_claims(claims: Dict[str, Any]) -> Optional[str]:
+    uid = claims.get("uid") or claims.get("user_id") or claims.get("sub")
+    if isinstance(uid, str) and uid.strip():
+        return uid.strip()
+    return None
+
+
 #------This Function initializes Firebase---------
 def init_firebase():
     global _app, _use_firebase_admin_verification
@@ -177,19 +185,19 @@ def init_firebase():
     )
 
 
-#------This Function gets the current user UID from token---------
-async def get_current_user_uid(
+#------This Function verifies the current token and returns claims---------
+async def get_current_user_claims(
     creds: HTTPAuthorizationCredentials = Depends(_bearer),
-) -> str:
+) -> Dict[str, Any]:
     global _use_firebase_admin_verification
     token = creds.credentials.strip()
     decoded: Optional[Dict[str, Any]] = None
 
     cached_claims = _get_cached_verified_claims(token)
     if cached_claims:
-        uid = cached_claims.get("uid") or cached_claims.get("user_id") or cached_claims.get("sub")
-        if isinstance(uid, str) and uid.strip():
-            return uid
+        uid = _extract_uid_from_claims(cached_claims)
+        if uid:
+            return cached_claims
 
     if _use_firebase_admin_verification:
         try:
@@ -209,7 +217,7 @@ async def get_current_user_uid(
     uid = None
     if decoded:
         _cache_verified_claims(token, decoded)
-        uid = decoded.get("uid") or decoded.get("user_id") or decoded.get("sub")
+        uid = _extract_uid_from_claims(decoded)
 
     if not isinstance(uid, str) or not uid.strip():
         raise HTTPException(
@@ -217,4 +225,17 @@ async def get_current_user_uid(
             detail="Invalid or expired token",
         )
 
+    return decoded
+
+
+#------This Function gets the current user UID from token---------
+async def get_current_user_uid(
+    claims: Dict[str, Any] = Depends(get_current_user_claims),
+) -> str:
+    uid = _extract_uid_from_claims(claims)
+    if not uid:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+        )
     return uid

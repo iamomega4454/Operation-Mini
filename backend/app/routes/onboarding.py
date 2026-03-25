@@ -4,6 +4,7 @@ from typing import Optional, List
 from app.core.firebase import get_current_user_uid
 from app.models.user import User, IllnessDetails, UserRole
 from app.models.medication import Medication
+from app.utils.caregiver_links import link_caregiver_to_patient
 from datetime import datetime
 
 router = APIRouter(prefix="/onboarding", tags=["onboarding"])
@@ -104,12 +105,8 @@ async def add_caregiver(body: CaregiverRequest, uid: str = Depends(get_current_u
         await user.save()
 
     existing_cg = await User.find_one(User.email == body.email)
-    if existing_cg and existing_cg.role != "admin":
-        from app.models.user import UserRole
-        existing_cg.role = UserRole.CAREGIVER
-        if uid not in existing_cg.linked_patients:
-            existing_cg.linked_patients.append(uid)
-        await existing_cg.save()
+    if existing_cg:
+        await link_caregiver_to_patient(user, existing_cg)
 
     return {"status": "ok"}
 
@@ -123,6 +120,9 @@ class PreferencesRequest(BaseModel):
     has_pets: str = ""
     favorite_food: str = ""
     communication_style: str = ""
+    health_notes: str = ""
+    dietary_notes: str = ""
+    wellness_habits: str = ""
     extra_notes: str = ""
 
 

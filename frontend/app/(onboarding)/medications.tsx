@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, Pressable, ScrollView, Platform, KeyboardAvoidingView, TextInput, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, Pressable, ScrollView, Platform, KeyboardAvoidingView, TextInput, ActivityIndicator, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import api from '../../src/services/api';
 import Screen from '../../src/components/Screen';
@@ -47,7 +47,7 @@ export default function PatientOnboardingRoutineScreen() {
 
       // Store permanently for agentic bot context
       await AsyncStorage.setItem('patient_preferences', JSON.stringify(preferences));
-      await api.put('/onboarding/preferences', preferences).catch(() => {});
+      await api.put('/onboarding/preferences', preferences);
 
       await AsyncStorage.removeItem('onboarding_patient_comforts');
       await AsyncStorage.removeItem('onboarding_patient_name');
@@ -55,8 +55,9 @@ export default function PatientOnboardingRoutineScreen() {
       await AsyncStorage.removeItem('onboarding_patient_health_notes');
 
       router.push('/(onboarding)/headphones');
-    } catch {
-      router.push('/(onboarding)/headphones');
+    } catch (error: any) {
+      const message = error?.response?.data?.detail || 'Unable to save your preferences right now.';
+      Alert.alert('Save Failed', message);
     } finally {
       setSaving(false);
     }

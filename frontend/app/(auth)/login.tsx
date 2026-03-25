@@ -115,7 +115,6 @@ export default function LoginScreen() {
 
             await signIn(
                 fbToken,
-                firebaseUser.user.email || '',
                 firebaseUser.user.displayName || '',
                 firebaseUser.user.photoURL || '',
             );

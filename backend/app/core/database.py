@@ -70,6 +70,7 @@ async def connect_db():
     from app.models.suggestion import Suggestion, SuggestionHistory
     from app.models.orito_interaction import OritoInteraction
     from app.models.reminder import Reminder
+    from app.models.assessment import PatientAssessment, CaregiverAssessment, PatientProfile
 
     await init_beanie(
         database=_client[settings.db_name],
@@ -84,6 +85,9 @@ async def connect_db():
             SuggestionHistory,
             OritoInteraction,
             Reminder,
+            PatientAssessment,
+            CaregiverAssessment,
+            PatientProfile,
         ],
     )
 

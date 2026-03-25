@@ -5,13 +5,14 @@ import { connectionMonitor } from '../services/connectionMonitor';
 import { authEvents } from '../services/authEvents';
 import { clearAuthToken, getAuthToken, setAuthToken } from '../services/authToken';
 
-interface User {
+export interface User {
     id: string;
     firebase_uid: string;
     email: string;
     display_name: string;
     photo_url: string;
-    role: string;
+    role: 'patient' | 'caregiver' | 'admin';
+    linked_patients: string[];
     is_onboarded: boolean;
     isVoiceSetup?: boolean;
 }
@@ -21,7 +22,7 @@ interface AuthState {
     token: string | null;
     loading: boolean;
     connectionError: boolean;
-    signIn: (idToken: string, email: string, name: string, photo: string) => Promise<void>;
+    signIn: (idToken: string, name: string, photo: string) => Promise<void>;
     signOut: () => Promise<void>;
     refreshUser: () => Promise<void>;
     markOnboarded: () => void;
@@ -131,18 +132,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     //------This Function handles the Sign In---------
-    async function signIn(idToken: string, email: string, name: string, photo: string) {
+    async function signIn(idToken: string, name: string, photo: string) {
         await setAuthToken(idToken);
         setToken(idToken);
         const registrationPayload = {
-            email,
             display_name: name,
             photo_url: photo,
         };
 
         try {
-            const res = await api.post('/auth/register', registrationPayload);
-            setUser(res.data);
+            await api.post('/auth/register', registrationPayload);
+            const meRes = await api.get('/auth/me');
+            setUser(meRes.data);
         } catch (err: any) {
             if (err.response?.status === 401) {
                 const refreshedToken = await getAuthToken(true);
@@ -151,8 +152,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                     setToken(refreshedToken);
 
                     try {
-                        const retryRes = await api.post('/auth/register', registrationPayload);
-                        setUser(retryRes.data);
+                        await api.post('/auth/register', registrationPayload);
+                        const retryMe = await api.get('/auth/me');
+                        setUser(retryMe.data);
                         return;
                     } catch (retryErr: any) {
                         err = retryErr;
@@ -195,6 +197,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 display_name: 'Alex Rivera',
                 photo_url: '',
                 role: 'patient',
+                linked_patients: [],
                 is_onboarded: true,
             },
             caregiver: {
@@ -204,6 +207,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 display_name: 'Dr. Sarah Chen',
                 photo_url: '',
                 role: 'caregiver',
+                linked_patients: ['dev_patient_uid'],
                 is_onboarded: true,
             },
             admin: {
@@ -213,6 +217,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 display_name: 'System Admin',
                 photo_url: '',
                 role: 'admin',
+                linked_patients: [],
                 is_onboarded: true,
             },
         };

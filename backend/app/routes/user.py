@@ -6,6 +6,7 @@ from app.core.firebase import get_current_user_uid
 from app.models.user import User, IllnessDetails
 from app.models.medication import Medication
 from app.models.relative import Relative
+from app.utils.caregiver_links import link_caregiver_to_patient, unlink_caregiver_from_patient
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -91,20 +92,7 @@ async def get_profile(uid: str = Depends(get_current_user_uid)):
         relatives = await Relative.find(Relative.patient_uid == uid).to_list()
         relatives_serialized = [_serialize_relative(r) for r in relatives]
 
-        
-        caregiver_users = []
-        if user.caregiver_emails:
-            for email in user.caregiver_emails:
-                caregiver = await User.find_one(User.email == email)
-                if caregiver:
-                    caregiver_users.append(
-                        {
-                            "id": str(caregiver.id),
-                            "email": caregiver.email,
-                            "name": caregiver.display_name,
-                            "photo_url": caregiver.photo_url,
-                        }
-                    )
+        caregiver_users = await _build_caregiver_list(user)
 
         return {
             "user": {
@@ -182,31 +170,7 @@ async def list_caregivers(uid: str = Depends(get_current_user_uid)):
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
 
-        caregivers = []
-        for email in user.caregiver_emails:
-            caregiver = await User.find_one(User.email == email)
-            if caregiver:
-                caregivers.append(
-                    {
-                        "id": str(caregiver.id),
-                        "email": caregiver.email,
-                        "name": caregiver.display_name,
-                        "photo_url": caregiver.photo_url,
-                        "relationship": "caregiver",
-                    }
-                )
-            else:
-                caregivers.append(
-                    {
-                        "id": "",
-                        "email": email,
-                        "name": "",
-                        "photo_url": "",
-                        "relationship": "caregiver",
-                    }
-                )
-
-        return caregivers
+        return await _build_caregiver_list(user)
     except HTTPException:
         raise
     except Exception as e:
@@ -225,19 +189,26 @@ async def add_caregiver(body: CaregiverAdd, uid: str = Depends(get_current_user_
         
         caregiver = await User.find_one(User.email == body.email)
         if not caregiver:
-            raise HTTPException(status_code=404, detail="Caregiver email not found")
+            if body.email not in user.caregiver_emails:
+                user.caregiver_emails.append(body.email)
+                user.updated_at = datetime.utcnow()
+                await user.save()
 
-        
-        if body.email not in user.caregiver_emails:
-            user.caregiver_emails.append(body.email)
-            user.updated_at = datetime.utcnow()
-            await user.save()
+            logger.info(f"Stored pending caregiver invite {body.email} for user {uid}")
 
-        
-        if uid not in caregiver.linked_patients:
-            caregiver.linked_patients.append(uid)
-            caregiver.updated_at = datetime.utcnow()
-            await caregiver.save()
+            return {
+                "status": "ok",
+                "caregiver": {
+                    "id": "",
+                    "email": body.email,
+                    "name": "",
+                    "photo_url": "",
+                    "relationship": body.relationship,
+                    "pending": True,
+                },
+            }
+
+        await link_caregiver_to_patient(user, caregiver)
 
         logger.info(f"Added caregiver {body.email} for user {uid}")
 
@@ -249,6 +220,7 @@ async def add_caregiver(body: CaregiverAdd, uid: str = Depends(get_current_user_
                 "name": caregiver.display_name,
                 "photo_url": caregiver.photo_url,
                 "relationship": body.relationship,
+                "pending": False,
             },
         }
     except HTTPException:
@@ -268,20 +240,14 @@ async def remove_caregiver(
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
 
-        if caregiver_email not in user.caregiver_emails:
+        caregiver = await User.find_one(User.email == caregiver_email)
+        has_pending_invite = caregiver_email in user.caregiver_emails
+        has_active_link = bool(caregiver and uid in caregiver.linked_patients)
+
+        if not has_pending_invite and not has_active_link:
             raise HTTPException(status_code=404, detail="Caregiver not found")
 
-        
-        user.caregiver_emails.remove(caregiver_email)
-        user.updated_at = datetime.utcnow()
-        await user.save()
-
-        
-        caregiver = await User.find_one(User.email == caregiver_email)
-        if caregiver and uid in caregiver.linked_patients:
-            caregiver.linked_patients.remove(uid)
-            caregiver.updated_at = datetime.utcnow()
-            await caregiver.save()
+        await unlink_caregiver_from_patient(user, caregiver_email)
 
         logger.info(f"Removed caregiver {caregiver_email} for user {uid}")
 
@@ -319,3 +285,30 @@ def _serialize_relative(rel: Relative) -> dict:
         "notes": rel.notes,
         "created_at": rel.created_at.isoformat(),
     }
+
+
+#------This Function builds caregiver list from linked users and pending invites---------
+async def _build_caregiver_list(user: User) -> List[dict]:
+    caregivers_by_email = {}
+
+    linked_caregivers = await User.find(User.linked_patients == user.firebase_uid).to_list()
+    for caregiver in linked_caregivers:
+        caregivers_by_email[caregiver.email] = {
+            "id": str(caregiver.id),
+            "email": caregiver.email,
+            "name": caregiver.display_name,
+            "photo_url": caregiver.photo_url,
+            "relationship": "caregiver",
+        }
+
+    for email in user.caregiver_emails:
+        if email not in caregivers_by_email:
+            caregivers_by_email[email] = {
+                "id": "",
+                "email": email,
+                "name": "",
+                "photo_url": "",
+                "relationship": "caregiver",
+            }
+
+    return list(caregivers_by_email.values())

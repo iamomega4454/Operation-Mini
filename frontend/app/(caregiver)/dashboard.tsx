@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, RefreshControl, TouchableOpacity } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../../src/context/auth';
+import { useAssessment } from '../../src/context/assessment';
 import api from '../../src/services/api';
 import ConnectionIndicator from '../../src/components/ConnectionIndicator';
 import AuraCard from '../../src/components/AuraCard';
@@ -12,17 +13,19 @@ import { Ionicons } from '@expo/vector-icons';
 export default function CaregiverDashboard() {
     const router = useRouter();
     const { user, signOut } = useAuth();
+    const { recommendedSurveys } = useAssessment();
     const [refreshing, setRefreshing] = useState(false);
     const [sosAlerts, setSosAlerts] = useState<any[]>([]);
     const [dailyStats, setDailyStats] = useState({ meds_taken: 0, total_meds: 0, conversations: 0 });
     const [locationInfo, setLocationInfo] = useState<{ location: any; displayName: string } | null>(null);
+    const recommendedAssessment = recommendedSurveys.find((survey) => survey.survey_type === 'caregiver');
 
     useEffect(() => { load(); }, []);
 
     //------This Function handles the Load---------
     async function load() {
         try {
-            const linkedPatients = (user as any)?.linked_patients as string[] | undefined;
+            const linkedPatients = user?.linked_patients;
             const patientUid = user?.role === 'caregiver' && linkedPatients?.length
                 ? linkedPatients[0]
                 : undefined;
@@ -89,6 +92,26 @@ export default function CaregiverDashboard() {
                                 </View>
                             </View>
                         ))}
+                    </View>
+                )}
+
+                {recommendedAssessment && (
+                    <View style={s.section}>
+                        <Text style={s.sectionLabel}>ASSESSMENT</Text>
+                        <TouchableOpacity
+                            style={s.assessmentCard}
+                            onPress={() => router.push('/(assessment)/caregiver' as any)}
+                            activeOpacity={0.8}
+                        >
+                            <View style={s.assessmentIcon}>
+                                <Ionicons name="analytics-outline" size={18} color={colors.bg} />
+                            </View>
+                            <View style={s.assessmentCopy}>
+                                <Text style={s.assessmentTitle}>Improve Confidence</Text>
+                                <Text style={s.assessmentSub}>Answer a short follow-up for {recommendedAssessment.patient_name}.</Text>
+                            </View>
+                            <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+                        </TouchableOpacity>
                     </View>
                 )}
 
@@ -245,6 +268,38 @@ const s = StyleSheet.create({
         color: 'rgba(255, 59, 48, 0.6)',
         fontSize: fonts.sizes.xs,
         marginTop: 2,
+    },
+    assessmentCard: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: spacing.md,
+        padding: spacing.md,
+        backgroundColor: colors.surface,
+        borderRadius: radius.xl,
+        borderWidth: 1,
+        borderColor: colors.border,
+    },
+    assessmentIcon: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: colors.white,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    assessmentCopy: {
+        flex: 1,
+        gap: 2,
+    },
+    assessmentTitle: {
+        color: colors.textPrimary,
+        fontSize: fonts.sizes.md,
+        fontWeight: '700',
+    },
+    assessmentSub: {
+        color: colors.textSecondary,
+        fontSize: fonts.sizes.xs,
+        lineHeight: 18,
     },
     summaryRow: {
         flexDirection: 'row',

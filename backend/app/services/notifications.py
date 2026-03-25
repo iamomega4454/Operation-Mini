@@ -1,9 +1,14 @@
 from typing import List, Optional, Dict, Any
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from firebase_admin import messaging
 from app.models.user import User
 import logging
 
 logger = logging.getLogger(__name__)
+
+#------Max concurrent Firebase messaging threads---------
+_FCM_EXECUTOR = ThreadPoolExecutor(max_workers=10)
 
 
 class NotificationService:
@@ -44,9 +49,11 @@ class NotificationService:
                 ),
             )
 
-            response = messaging.send(message)
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(_FCM_EXECUTOR, messaging.send, message)
             logger.info(f"Successfully sent notification to token {fcm_token[:10]}...")
             return True
+
 
         except messaging.UnregisteredError:
             logger.warning(f"Token {fcm_token[:10]}... is invalid or expired")
@@ -184,5 +191,11 @@ class NotificationService:
         )
 
 
-
 notification_service = NotificationService()
+
+
+#------This Function shuts down the FCM thread pool---------
+def shutdown_executor() -> None:
+    """Gracefully shut down the shared FCM thread pool."""
+    _FCM_EXECUTOR.shutdown(wait=False)
+    logger.info("FCM executor shut down")

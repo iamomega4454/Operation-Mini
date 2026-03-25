@@ -19,6 +19,7 @@ from app.core.firebase import init_firebase, _app as firebase_app
 from app.core.database import connect_db, close_db, get_aura_modules_db, check_db_health
 from app.routes import (
     auth,
+    assessment,
     onboarding,
     medications,
     journal,
@@ -39,6 +40,8 @@ from app.routes import (
 )
 from app.routes import settings as settings_router
 from app.services.cleanup_task import cleanup_stale_modules
+from app.services.reminder_scheduler import reminder_check_loop
+from app.services.notifications import shutdown_executor as shutdown_fcm_executor
 
 try:
     import fcntl
@@ -286,6 +289,7 @@ def stop_update_monitor() -> None:
 
 
 _cleanup_task = None
+_reminder_task = None
 
 
 #------This Function handles the CLI arguments---------
@@ -357,7 +361,7 @@ def _log_access_urls() -> None:
 #------This Function handles the lifespan events---------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _cleanup_task
+    global _cleanup_task, _reminder_task
 
     
     logger.info(f"Starting {settings.environment} environment")
@@ -390,6 +394,12 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Could not start cleanup task: {str(e)}")
 
+    try:
+        _reminder_task = asyncio.create_task(reminder_check_loop())
+        print(f"{GREEN}[OK] Reminder scheduler started{RESET}")
+    except Exception as e:
+        logger.warning(f"Could not start reminder scheduler: {str(e)}")
+
     _log_access_urls()
 
     yield
@@ -403,7 +413,14 @@ async def lifespan(app: FastAPI):
             await _cleanup_task
         except asyncio.CancelledError:
             pass
+    if _reminder_task:
+        _reminder_task.cancel()
+        try:
+            await _reminder_task
+        except asyncio.CancelledError:
+            pass
     stop_update_monitor()
+    shutdown_fcm_executor()
 
     await close_db()
     print(f"{RED}[SHUTDOWN] Application shutdown complete{RESET}")
@@ -493,6 +510,7 @@ async def log_requests(request: Request, call_next):
 
 
 app.include_router(auth.router)
+app.include_router(assessment.router)
 app.include_router(user.router)
 app.include_router(onboarding.router)
 app.include_router(medications.router)
